@@ -32,7 +32,7 @@ typedef struct {
 
 typedef struct {
     IWICBitmapDecoder *decoder;
-    IWICBitmapSource *wic_bitmap;
+    IWICFormatConverter *wic_bitmap;
     UINT width;
     UINT height;
     UINT frame_count;
@@ -65,8 +65,7 @@ HRESULT set_decoder_from_file(PCWSTR path)
 HRESULT set_current_frame(void)
 {
     if (g_img.wic_bitmap) {
-        // IWICBitmapSource doesn't have Release, so we cast back
-        ((IWICBitmapScaler *)g_img.wic_bitmap)->lpVtbl->Release(g_img.wic_bitmap);
+        g_img.wic_bitmap->lpVtbl->Release(g_img.wic_bitmap);
     }
 
     IWICBitmapFrameDecode *frame = NULL;
@@ -105,31 +104,13 @@ HRESULT set_current_frame(void)
     hr = converter->lpVtbl->GetSize(converter, &width, &height);
     if (FAILED(hr)) return hr;
 
-    g_img.wic_bitmap = converter;
-
     if (width > g_sys.max_img_width || height > g_sys.max_img_height) {
-
         float factor = min(g_sys.max_img_width / width, g_sys.max_img_height / height);
         width = (UINT)(width * factor);
         height = (UINT)(height * factor);
-
-        IWICBitmapScaler *scaler = NULL;
-        hr = g_imaging_factory->lpVtbl->CreateBitmapScaler(g_imaging_factory, &scaler);
-        if (FAILED(hr)) return hr;
-
-        hr = scaler->lpVtbl->Initialize(
-                scaler,
-                (IWICBitmapSource *)converter,
-                width,
-                height,
-                WICBitmapInterpolationModeFant
-        );
-        if (FAILED(hr)) return hr;
-
-        converter->lpVtbl->Release(converter);
-        g_img.wic_bitmap = scaler;
     }
 
+    g_img.wic_bitmap = converter;
     g_img.width = width;
     g_img.height = height;
 
