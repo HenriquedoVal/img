@@ -7,7 +7,6 @@
 
 #define UNICODE
 #define _UNICODE
-#define _CRT_SECURE_NO_WARNINGS
 
 #include <assert.h>
 #include <stdio.h>
@@ -19,7 +18,7 @@
 #include "d2d1_c.h"
 #include "d2d1_helpers.c"
 
-#define MULTIFRAME_INTERVAL_MS 90
+#define DEFAULT_MULTIFRAME_INTERVAL_MS 90
 #define DPI_AWARE
 
 
@@ -33,11 +32,13 @@ typedef struct {
 typedef struct {
     IWICBitmapDecoder *decoder;
     IWICFormatConverter *wic_bitmap;
-    UINT width;
-    UINT height;
+    FLOAT width;
+    FLOAT height;
+    FLOAT offset_x;
+    FLOAT offset_y;
     UINT frame_count;
     UINT current_frame;
-    // UINT frame_delay;
+    UINT frame_delay;
 } Image;
 
 static SystemInfo g_sys = {0};
@@ -57,6 +58,7 @@ HRESULT set_decoder_from_file(PCWSTR path)
     );
     if (FAILED(hr)) return hr;
 
+    g_img.frame_delay = DEFAULT_MULTIFRAME_INTERVAL_MS;
     hr = g_img.decoder->lpVtbl->GetFrameCount(g_img.decoder, &g_img.frame_count);
     return hr;
 }
@@ -72,15 +74,38 @@ HRESULT set_current_frame(void)
     HRESULT hr = g_img.decoder->lpVtbl->GetFrame(g_img.decoder, g_img.current_frame, &frame);
     if (FAILED(hr)) return hr;
 
-    // IWICMetadataQueryReader *meta;
-    // hr = frame->lpVtbl->GetMetadataQueryReader(frame, &meta);
-    // if (SUCCEEDED(hr)) {
-    //     PROPVARIANT prop;
-    //     PropVariantInit(&prop);
-    //     hr = meta->lpVtbl->GetMetadataByName(meta, L"/grctlext/Delay", &prop);
-    //
-    //     printf("got metadata by name? %i\n", SUCCEEDED(hr));
-    // }
+    if (g_img.frame_count) {
+
+        IWICMetadataQueryReader *meta;
+        hr = frame->lpVtbl->GetMetadataQueryReader(frame, &meta);
+        if (SUCCEEDED(hr)) {
+            PROPVARIANT prop;
+            PropVariantInit(&prop);
+
+            // Gif
+            hr = meta->lpVtbl->GetMetadataByName(meta, L"/grctlext/Delay", &prop);
+            if (SUCCEEDED(hr) && prop.vt == VT_UI2) {
+                UINT frame_delay;
+                hr = UIntMult(prop.uiVal, 10, &frame_delay);
+                if (FAILED(hr)) return -1;
+                if (frame_delay) g_img.frame_delay = frame_delay;
+                PropVariantClear(&prop);
+
+                hr = meta->lpVtbl->GetMetadataByName(meta, L"/imgdesc/Left", &prop);
+                if (FAILED(hr) || prop.vt != VT_UI2) return -1;
+                UINT left = prop.uiVal;
+                PropVariantClear(&prop);
+                g_img.offset_x = (FLOAT)left;
+
+                hr = meta->lpVtbl->GetMetadataByName(meta, L"/imgdesc/Top", &prop);
+                if (FAILED(hr) || prop.vt != VT_UI2) return -1;
+                UINT top = prop.uiVal;
+                PropVariantClear(&prop);
+                g_img.offset_y = (FLOAT)top;
+            }
+        }
+
+    }
 
     // Convert the image format to 32bppPBGRA
     // (DXGI_FORMAT_B8G8R8A8_UNORM + D2D1_ALPHA_MODE_PREMULTIPLIED).
@@ -111,8 +136,8 @@ HRESULT set_current_frame(void)
     }
 
     g_img.wic_bitmap = converter;
-    g_img.width = width;
-    g_img.height = height;
+    g_img.width = (FLOAT)width;
+    g_img.height = (FLOAT)height;
 
     return hr;
 }
@@ -179,7 +204,12 @@ LRESULT CALLBACK WindowProc(HWND window, unsigned msg, WPARAM wparam, LPARAM lpa
             // D2D1_COLOR_F gray = {0.18f, 0.18f, 0.18f, 1.0f};
             // target->lpVtbl->Clear(target, &gray);
 
-            D2D1_RECT_F rect = {(FLOAT)g_img.width, (FLOAT)g_img.height};
+            D2D1_RECT_F rect = {
+                g_img.offset_x,
+                g_img.offset_y,
+                g_img.width + g_img.offset_x,
+                g_img.height + g_img.offset_y
+            };
             target->lpVtbl->DrawBitmap(
                     target,
                     bitmap,
@@ -202,8 +232,9 @@ LRESULT CALLBACK WindowProc(HWND window, unsigned msg, WPARAM wparam, LPARAM lpa
             if (g_img.frame_count > 1) {
                 g_img.current_frame++;
                 g_img.current_frame %= g_img.frame_count;
-                set_current_frame();
-                SetTimer(window, timer_event_id, MULTIFRAME_INTERVAL_MS, NULL);
+                hr = set_current_frame();
+                if (FAILED(hr)) return -1;
+                SetTimer(window, timer_event_id, g_img.frame_delay, NULL);
             }
 
             return 0;
@@ -358,7 +389,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE _prev_inst, PWSTR cmd_line, in
         return hr;
     }
 
-    RECT rect = { .right = g_img.width, .bottom = g_img.height };
+    RECT rect = { .right = (LONG)g_img.width, .bottom = (LONG)g_img.height };
 
 #ifdef DPI_AWARE
 
