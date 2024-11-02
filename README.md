@@ -9,6 +9,6 @@ Because there is no reason to wait two seconds to see an image using default Win
 ~~~
 
 ### TODOs
-- Render multiframed images (GIF and TIFF) properly. (webp are ok).
 - Walk through img files in target dir.
 - Add switch to dump some metadata.
+- Add option to make window bigger than img like a frame
