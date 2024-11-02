@@ -103,8 +103,9 @@ HRESULT set_current_frame(void)
                 PropVariantClear(&prop);
                 g_img.offset_y = (FLOAT)top;
             }
-        }
 
+            meta->lpVtbl->Release(meta);
+        }
     }
 
     // Convert the image format to 32bppPBGRA
